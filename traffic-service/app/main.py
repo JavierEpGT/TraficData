@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import json
 import logging
+import secrets
 from dataclasses import dataclass
 from typing import Any
 from uuid import uuid4
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Header, HTTPException, Query
+from pydantic import ValidationError
 
 from app.config import Settings, get_settings
 from app.congestion import CongestionError, congestion_index
@@ -16,7 +18,7 @@ from app.contract import build_payload, payload_to_dict, utc_timestamp_z
 from app.dw_client import DwClient, DwClientError
 from app.geo import destination_point
 from app.mapbox_client import DualRouteResult, MapboxClient, MapboxError
-from app.models import ReadingRequest, ReadingResponse
+from app.models import FeedQuery, FeedResponse, ReadingRequest, ReadingResponse
 from app.storage import RawReading, Storage
 
 logging.basicConfig(
@@ -68,6 +70,15 @@ def validate_routes(
             return "SEGMENT_MISMATCH"
 
     return None
+
+
+def _feed_token_ok(expected: str | None, provided: str | None) -> bool:
+    """Constant-time compare; missing tokens never authorize."""
+    if not expected or not provided:
+        return False
+    if len(expected) != len(provided):
+        return False
+    return secrets.compare_digest(expected, provided)
 
 
 def process_reading(
@@ -215,6 +226,40 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             payload=result.payload,
             error=result.error,
         )
+
+    @app.get("/traffic/readings", response_model=FeedResponse)
+    def traffic_readings(
+        since: str | None = Query(default=None),
+        limit: int = Query(default=100, ge=1, le=500),
+        x_api_key: str | None = Header(default=None),
+    ) -> FeedResponse:
+        cfg = app_settings or get_settings()
+        if not _feed_token_ok(cfg.g4_feed_token, x_api_key):
+            raise HTTPException(status_code=401, detail="unauthorized")
+
+        try:
+            query = FeedQuery.model_validate({"since": since, "limit": limit})
+        except ValidationError:
+            raise HTTPException(
+                status_code=422,
+                detail="since must be ISO-8601 UTC to seconds with Z suffix",
+            )
+
+        storage = Storage(cfg.db_path)
+        rows = storage.fetch_valid_readings(since=query.since, limit=query.limit)
+        items = [
+            build_payload(
+                latitude=float(row["lat"]),
+                longitude=float(row["lon"]),
+                student_id=cfg.student_id,
+                secret_key=cfg.secret_key,
+                traffic_congestion_index=float(row["traffic_congestion_index"]),
+                timestamp=str(row["timestamp"]),
+                reading_id=row["reading_id"],
+            )
+            for row in rows
+        ]
+        return FeedResponse(count=len(items), items=items)
 
     return app
 

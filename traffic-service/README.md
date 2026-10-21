@@ -57,6 +57,7 @@ python -m app.cli run --csv data/points.csv
 | `DB_PATH` | no | `traffic.db` | SQLite local |
 | `GROUP1_API_URL` | no | — | Feed G1 (`https://api.quick-convertor.com/api/records`) |
 | `GROUP1_API_TOKEN` | no | — | API key G1 enviada como header `x-api-key` |
+| `G4_FEED_TOKEN` | no* | — | API key del feed para Prefect G4 (`x-api-key`) |
 
 Los secretos **nunca** se hardcodean ni se loguean.
 
@@ -72,8 +73,23 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
 - `GET /health` → `{"status":"ok"}`
 - `POST /traffic/reading` body: `{"latitude": 14.6349, "longitude": -90.5069}`
+- `GET /traffic/readings` — feed autenticado para Prefect G4
 
-Respuesta incluye `status` (`SENT` | `DRY_RUN` | `FAILED` | `INVALID`), `payload` (si aplica) y `error`.
+Respuesta de `POST /traffic/reading` incluye `status` (`SENT` | `DRY_RUN` | `FAILED` | `INVALID`), `payload` (si aplica) y `error`.
+
+### Feed Prefect (G4)
+
+G4 **tira** lecturas válidas (Data Contract). Header `x-api-key` = `G4_FEED_TOKEN`. Query: `since` (ISO-8601 `...Z`, exclusivo) y `limit` (1–500, default 100).
+
+```bash
+curl -H "x-api-key: $G4_FEED_TOKEN" \
+  "https://<host-g2>/traffic/readings?limit=100"
+
+curl -H "x-api-key: $G4_FEED_TOKEN" \
+  "https://<host-g2>/traffic/readings?since=2026-10-10T22:30:00Z&limit=100"
+```
+
+Solo `DRY_RUN` / `SENT` con `traffic_congestion_index`. El host debe ser público (no `localhost`).
 
 ## CLI
 
@@ -153,3 +169,4 @@ Campos: `reading_id`, `timestamp`, `latitude`, `longitude`, `student_id`, `auth_
 - Confirmar endpoint y autenticación del DW
 - Confirmar aceptación de `null` en `noise_db` / `air_quality_aqi`
 - `Group1ApiSource` ya consume `/api/records` (auth `x-api-key`, paginación)
+- Feed Prefect G4: `GET /traffic/readings` (header `x-api-key`)

@@ -189,6 +189,7 @@ Eso actualiza `coverage_log.csv`, SQLite y `readings.csv`. Repetir en **hora pic
 | `DB_PATH` | no | `traffic.db` | SQLite local |
 | `GROUP1_API_URL` | no | — | Feed G1 (`…/api/records`) |
 | `GROUP1_API_TOKEN` | no | — | API key G1 (header `x-api-key`) |
+| `G4_FEED_TOKEN` | no* | — | API key del feed para Prefect G4 (`x-api-key`) |
 
 Los secretos **nunca** se hardcodean ni se loguean. No subir `.env` al repo.
 
@@ -205,6 +206,15 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
 - `GET /health` → `{"status":"ok"}`
 - `POST /traffic/reading` con body `{"latitude": 14.6349, "longitude": -90.5069}`
+- `GET /traffic/readings` — feed para Prefect G4 (requiere `x-api-key` = `G4_FEED_TOKEN`)
+
+```bash
+curl -H "x-api-key: $G4_FEED_TOKEN" \
+  "https://<host-g2>/traffic/readings?limit=100"
+# Incremental: agregar &since=2026-10-10T22:30:00Z
+```
+
+Solo lecturas `DRY_RUN` / `SENT` con índice. Respuesta: `{ "count": N, "items": [Data Contract...] }`. No usar `localhost` para G4: el servicio debe estar publicado.
 
 ### CLI
 
@@ -256,6 +266,7 @@ Coordinar con los otros grupos:
 - [ ] Confirmar formato exacto de `auth_hash` con G4
 - [ ] Confirmar endpoint y autenticación del DW
 - [ ] Confirmar aceptación de `null` en `noise_db` / `air_quality_aqi`
+- [x] Feed pull para Prefect G4 (`GET /traffic/readings`)
 - [x] Origen de coordenadas: CSV o API G1 (`python -m app.cli run --from-g1`)
 
 ---

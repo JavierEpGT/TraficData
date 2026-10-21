@@ -27,6 +27,7 @@ class Settings(BaseSettings):
     db_path: str = Field(default="traffic.db", alias="DB_PATH")
     group1_api_url: str | None = Field(default=None, alias="GROUP1_API_URL")
     group1_api_token: str | None = Field(default=None, alias="GROUP1_API_TOKEN")
+    g4_feed_token: str | None = Field(default=None, alias="G4_FEED_TOKEN")
 
     @property
     def should_send_to_dw(self) -> bool:

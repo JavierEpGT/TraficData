@@ -114,6 +114,28 @@ class Storage:
             ).fetchall()
         return [dict(row) for row in rows]
 
+    def fetch_valid_readings(
+        self,
+        *,
+        since: str | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        """Valid readings for the G4 Prefect feed (DRY_RUN / SENT with index)."""
+        sql = """
+            SELECT * FROM readings_raw
+            WHERE status IN ('DRY_RUN', 'SENT')
+              AND traffic_congestion_index IS NOT NULL
+        """
+        params: list[Any] = []
+        if since is not None:
+            sql += " AND timestamp > ?"
+            params.append(since)
+        sql += " ORDER BY timestamp ASC, reading_id ASC LIMIT ?"
+        params.append(limit)
+        with self._connect() as conn:
+            rows = conn.execute(sql, params).fetchall()
+        return [dict(row) for row in rows]
+
     def export_csv(self, out_path: str) -> int:
         rows = self.fetch_all()
         fieldnames = [

@@ -70,3 +70,24 @@ class ReadingResponse(BaseModel):
     status: str
     payload: dict[str, Any] | None = None
     error: str | None = None
+
+
+class FeedQuery(BaseModel):
+    """Query params for the G4 Prefect feed."""
+
+    since: str | None = None
+    limit: int = Field(default=100, ge=1, le=500)
+
+    @field_validator("since")
+    @classmethod
+    def since_iso_z(cls, value: str | None) -> str | None:
+        if value is not None and not TIMESTAMP_RE.match(value):
+            raise ValueError("since must be ISO-8601 UTC to seconds with Z suffix")
+        return value
+
+
+class FeedResponse(BaseModel):
+    """Paginated Data Contract list for G4 Prefect."""
+
+    count: int
+    items: list[DataContractPayload]
