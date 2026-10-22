@@ -7,7 +7,7 @@ Dado un punto GPS real (`lat`/`lon`):
 1. Consulta Mapbox Directions (`driving-traffic` + `driving`)
 2. Calcula el Índice de Congestión ∈ [0, 1]
 3. Arma el Data Contract estándar y lo envía (o imprime en `DRY_RUN`) al Data Warehouse del G4
-4. Guarda métricas crudas en SQLite para Looker Studio
+4. Guarda métricas crudas en SQLite (o Postgres si hay `DATABASE_URL`) para Looker Studio
 
 **Regla:** sin datos simulados en producción. Si Mapbox falla o la lectura es inválida, se descarta y se registra el error.
 
@@ -54,7 +54,8 @@ python -m app.cli run --csv data/points.csv
 | `DRY_RUN` | no | `true` | Si `true` o no hay DW URL: no envía, imprime payload |
 | `SEGMENT_LENGTH_M` | no | `400` | Longitud del tramo sintético (m) |
 | `SEGMENT_BEARING_DEG` | no | `0` | Rumbo del segundo punto (°) |
-| `DB_PATH` | no | `traffic.db` | SQLite local |
+| `DB_PATH` | no | `traffic.db` | SQLite local (si `DATABASE_URL` está vacío) |
+| `DATABASE_URL` | no | — | URL de Postgres/Neon. Si está vacío, se usa SQLite + `DB_PATH` |
 | `GROUP1_API_URL` | no | — | Feed G1 (`https://api.quick-convertor.com/api/records`) |
 | `GROUP1_API_TOKEN` | no | — | API key G1 enviada como header `x-api-key` |
 | `G4_FEED_TOKEN` | no* | — | API key del feed para Prefect G4 (`x-api-key`) |
@@ -79,7 +80,7 @@ Respuesta de `POST /traffic/reading` incluye `status` (`SENT` | `DRY_RUN` | `FAI
 
 ### Feed Prefect (G4)
 
-G4 **tira** lecturas válidas (Data Contract). Header `x-api-key` = `G4_FEED_TOKEN`. Query: `since` (ISO-8601 `...Z`, exclusivo) y `limit` (1–500, default 100).
+G4 **tira** lecturas válidas (Data Contract). Header `x-api-key` = `G4_FEED_TOKEN`. Query: `since` (ISO-8601 `...Z`, inclusivo) y `limit` (1–500, default 100).
 
 ```bash
 curl -H "x-api-key: $G4_FEED_TOKEN" \
@@ -104,7 +105,7 @@ python -m app.cli run --from-g1
 python -m app.cli run --csv points.csv --loop --interval 300
 python -m app.cli run --from-g1 --loop --interval 300
 
-# Exportar SQLite → CSV (fuente Looker Studio)
+# Exportar lecturas (SQLite o Postgres) → CSV (fuente Looker Studio)
 python -m app.cli export-csv --out readings.csv
 ```
 

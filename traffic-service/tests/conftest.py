@@ -13,6 +13,8 @@ os.environ.setdefault("SECRET_KEY", "test-secret-key")
 os.environ.setdefault("DRY_RUN", "true")
 os.environ.setdefault("SEGMENT_LENGTH_M", "400")
 os.environ.setdefault("SEGMENT_BEARING_DEG", "0")
+# Never let the suite hit Neon / production Postgres
+os.environ["DATABASE_URL"] = ""
 
 from app.config import Settings, get_settings
 from app.mapbox_client import PROFILE_FREE, PROFILE_TRAFFIC
@@ -36,6 +38,7 @@ def settings(tmp_path) -> Settings:
         SEGMENT_LENGTH_M=400,
         SEGMENT_BEARING_DEG=0,
         DB_PATH=str(tmp_path / "test.db"),
+        DATABASE_URL=None,
         DW_ENDPOINT_URL=None,
         DW_AUTH_TOKEN=None,
     )

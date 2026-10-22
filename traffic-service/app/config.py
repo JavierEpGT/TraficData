@@ -2,7 +2,7 @@
 
 from functools import lru_cache
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -25,9 +25,19 @@ class Settings(BaseSettings):
     segment_length_m: float = Field(default=400.0, alias="SEGMENT_LENGTH_M")
     segment_bearing_deg: float = Field(default=0.0, alias="SEGMENT_BEARING_DEG")
     db_path: str = Field(default="traffic.db", alias="DB_PATH")
+    database_url: str | None = Field(default=None, alias="DATABASE_URL")
     group1_api_url: str | None = Field(default=None, alias="GROUP1_API_URL")
     group1_api_token: str | None = Field(default=None, alias="GROUP1_API_TOKEN")
     g4_feed_token: str | None = Field(default=None, alias="G4_FEED_TOKEN")
+
+    @field_validator("database_url", mode="before")
+    @classmethod
+    def empty_database_url_to_none(cls, value: object) -> object:
+        if value is None:
+            return None
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
 
     @property
     def should_send_to_dw(self) -> bool:

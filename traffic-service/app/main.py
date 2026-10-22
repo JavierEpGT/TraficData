@@ -91,14 +91,14 @@ def process_reading(
     dw: DwClient | None = None,
 ) -> ProcessResult:
     """
-    End-to-end: geo → Mapbox → validate → index → contract → DW/DRY_RUN → SQLite.
+    End-to-end: geo → Mapbox → validate → index → contract → DW/DRY_RUN → storage.
 
     Never invents values: Mapbox failures and invalid readings are discarded.
     """
     owns_mapbox = mapbox is None
     owns_storage = storage is None
     mapbox = mapbox or MapboxClient(settings.mapbox_access_token)
-    storage = storage or Storage(settings.db_path)
+    storage = storage or Storage(settings.db_path, settings.database_url)
 
     reading_id = str(uuid4())
     timestamp = utc_timestamp_z()
@@ -245,7 +245,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 detail="since must be ISO-8601 UTC to seconds with Z suffix",
             )
 
-        storage = Storage(cfg.db_path)
+        storage = Storage(cfg.db_path, cfg.database_url)
         rows = storage.fetch_valid_readings(since=query.since, limit=query.limit)
         items = [
             build_payload(

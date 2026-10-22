@@ -42,7 +42,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         logger.error("No points found from selected source")
         return 1
 
-    storage = Storage(settings.db_path)
+    storage = Storage(settings.db_path, settings.database_url)
     iteration = 0
     while True:
         iteration += 1
@@ -75,7 +75,7 @@ def cmd_run(args: argparse.Namespace) -> int:
 
 def cmd_export_csv(args: argparse.Namespace) -> int:
     settings = get_settings()
-    storage = Storage(settings.db_path)
+    storage = Storage(settings.db_path, settings.database_url)
     count = storage.export_csv(args.out)
     print(f"Exported {count} rows to {args.out}")
     return 0

@@ -3,7 +3,7 @@
 G2 local batch (no DW / no other groups required).
 
 1) Coverage check → append coverage_log.csv
-2) Ingest all CSV points → SQLite (DRY_RUN by default)
+2) Ingest all CSV points → SQLite/Postgres (DRY_RUN by default)
 3) Export readings.csv for Looker Studio
 
 Usage (from traffic-service/):
@@ -50,7 +50,7 @@ def run_ingest(csv_path: str) -> Counter[str]:
     get_settings.cache_clear()
     settings = get_settings()
     points = CsvSource(csv_path).get_points()
-    storage = Storage(settings.db_path)
+    storage = Storage(settings.db_path, settings.database_url)
     counts: Counter[str] = Counter()
 
     logger.info("Ingesting %s points (dry_run=%s)", len(points), settings.dry_run)
@@ -70,7 +70,7 @@ def run_ingest(csv_path: str) -> Counter[str]:
 def run_export(out_path: str) -> int:
     get_settings.cache_clear()
     settings = get_settings()
-    count = Storage(settings.db_path).export_csv(out_path)
+    count = Storage(settings.db_path, settings.database_url).export_csv(out_path)
     logger.info("Exported %s rows to %s", count, out_path)
     return count
 
