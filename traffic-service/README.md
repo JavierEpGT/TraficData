@@ -55,7 +55,7 @@ python -m app.cli run --csv data/points.csv
 | `SEGMENT_LENGTH_M` | no | `400` | Longitud del tramo sintético (m) |
 | `SEGMENT_BEARING_DEG` | no | `0` | Rumbo del segundo punto (°) |
 | `DB_PATH` | no | `traffic.db` | SQLite local (si `DATABASE_URL` está vacío) |
-| `DATABASE_URL` | no | — | URL de Postgres/Neon. Si está vacío, se usa SQLite + `DB_PATH` |
+| `DATABASE_URL` | sí en Render | — | URL de Neon. En Render es **obligatoria**: G4 lee esta Postgres, no el SQLite efímero |
 | `GROUP1_API_URL` | no | — | Feed G1 (`https://api.quick-convertor.com/api/records`) |
 | `GROUP1_API_TOKEN` | no | — | API key G1 enviada como header `x-api-key` |
 | `G4_FEED_TOKEN` | no* | — | API key del feed para Prefect G4 (`x-api-key`) |
@@ -91,6 +91,15 @@ curl -H "x-api-key: $G4_FEED_TOKEN" \
 ```
 
 Solo `DRY_RUN` / `SENT` con `traffic_congestion_index`. El host debe ser público (no `localhost`).
+
+### Render + Neon (obligatorio para G4)
+
+El disco de Render se borra al dormir o redesplegar. Sin `DATABASE_URL`, el feed queda en `{"count":0,"items":[]}`.
+
+1. Render → servicio `traficdata` → **Environment**.
+2. Add `DATABASE_URL` = la misma URL de Neon que está en `traffic-service/.env` (nunca la subas a Git).
+3. Save. Render redespliega y `GET /traffic/readings` lee `readings_raw` en Neon.
+4. En Render, `DATABASE_URL` es obligatoria: el proceso no arranca con SQLite.
 
 ## CLI
 

@@ -30,8 +30,18 @@ def _load_points(args: argparse.Namespace) -> list[tuple[float, float]]:
     return CsvSource(args.csv).get_points()
 
 
+def _storage_backend(database_url: str | None) -> str:
+    return "postgres" if database_url else "sqlite"
+
+
 def cmd_run(args: argparse.Namespace) -> int:
     settings = get_settings()
+    if args.from_g1 and not settings.database_url:
+        logger.error(
+            "DATABASE_URL must be set in .env for --from-g1 so readings go to Neon for G4"
+        )
+        return 1
+
     try:
         points = _load_points(args)
     except (Group1ApiError, ValueError, FileNotFoundError) as exc:
@@ -41,6 +51,10 @@ def cmd_run(args: argparse.Namespace) -> int:
     if not points:
         logger.error("No points found from selected source")
         return 1
+
+    backend = _storage_backend(settings.database_url)
+    source = "g1" if args.from_g1 else "csv"
+    logger.info("storage_backend=%s source=%s points=%s", backend, source, len(points))
 
     storage = Storage(settings.db_path, settings.database_url)
     iteration = 0
@@ -97,7 +111,7 @@ def build_parser() -> argparse.ArgumentParser:
     source.add_argument(
         "--from-g1",
         action="store_true",
-        help="Load GPS points from Group 1 records API (GROUP1_API_URL + GROUP1_API_TOKEN)",
+        help="Load GPS points from Group 1 records API (requires DATABASE_URL / Neon)",
     )
     run_p.add_argument("--loop", action="store_true", help="Repeat forever")
     run_p.add_argument(

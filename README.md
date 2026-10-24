@@ -186,7 +186,8 @@ Eso actualiza `coverage_log.csv`, SQLite y `readings.csv`. Repetir en **hora pic
 | `DRY_RUN` | no | `true` | Si `true` o sin DW URL: no envía, imprime payload |
 | `SEGMENT_LENGTH_M` | no | `400` | Longitud del tramo (m) |
 | `SEGMENT_BEARING_DEG` | no | `0` | Rumbo del segundo punto (°) |
-| `DB_PATH` | no | `traffic.db` | SQLite local |
+| `DB_PATH` | no | `traffic.db` | SQLite local (solo si no hay `DATABASE_URL`) |
+| `DATABASE_URL` | sí en Render | — | Neon. En Render es obligatoria para que G4 no lea un SQLite vacío |
 | `GROUP1_API_URL` | no | — | Feed G1 (`…/api/records`) |
 | `GROUP1_API_TOKEN` | no | — | API key G1 (header `x-api-key`) |
 | `G4_FEED_TOKEN` | no* | — | API key del feed para Prefect G4 (`x-api-key`) |

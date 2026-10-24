@@ -1,8 +1,11 @@
 """Application settings from environment variables."""
 
+from __future__ import annotations
+
+import os
 from functools import lru_cache
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -38,6 +41,16 @@ class Settings(BaseSettings):
         if isinstance(value, str) and not value.strip():
             return None
         return value
+
+    @model_validator(mode="after")
+    def require_database_url_on_render(self) -> Settings:
+        """Render disk is ephemeral; G4 must read Neon, not a fresh SQLite."""
+        if os.getenv("RENDER") == "true" and not self.database_url:
+            raise ValueError(
+                "DATABASE_URL is required on Render. Set the Neon connection "
+                "string so G4 reads persistent Postgres instead of ephemeral SQLite."
+            )
+        return self
 
     @property
     def should_send_to_dw(self) -> bool:

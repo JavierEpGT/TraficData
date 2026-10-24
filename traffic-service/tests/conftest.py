@@ -15,6 +15,7 @@ os.environ.setdefault("SEGMENT_LENGTH_M", "400")
 os.environ.setdefault("SEGMENT_BEARING_DEG", "0")
 # Never let the suite hit Neon / production Postgres
 os.environ["DATABASE_URL"] = ""
+os.environ.pop("RENDER", None)
 
 from app.config import Settings, get_settings
 from app.mapbox_client import PROFILE_FREE, PROFILE_TRAFFIC
