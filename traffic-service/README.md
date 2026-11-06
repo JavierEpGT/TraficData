@@ -105,7 +105,7 @@ El disco de Render se borra al dormir o redesplegar. Sin `DATABASE_URL`, el feed
 
 Workflow: [`.github/workflows/ingest.yml`](../.github/workflows/ingest.yml).
 
-- **Cron:** cada 30 minutos (hora **UTC**, no hora Guatemala).
+- **Cron:** 2 veces al día — 08:00 y 20:00 hora Guatemala (`0 14` y `0 2` UTC).
 - **Manual:** Actions → *Ingest G1 to Neon* → *Run workflow*, o `gh workflow run ingest.yml`.
 - **Comando:** `python -m app.cli run --from-g1` (una corrida por job; sin `--loop`).
 - El runner **no** usa SQLite: las lecturas van a Neon (`DATABASE_URL`) para que G4 las lea vía Render.

@@ -2,8 +2,9 @@ name: Ingest G1 to Neon
 
 on:
   schedule:
-    # Every 30 minutes (UTC). Manual runs use workflow_dispatch.
-    - cron: "*/30 * * * *"
+    # Twice daily: 08:00 and 20:00 Guatemala (UTC-6). Manual runs use workflow_dispatch.
+    - cron: "0 14 * * *"
+    - cron: "0 2 * * *"
   workflow_dispatch:
 
 jobs:
