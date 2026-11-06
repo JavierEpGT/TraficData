@@ -45,6 +45,29 @@ def test_fetch_dual_route_success() -> None:
 
 
 @respx.mock
+def test_fetch_route_sends_snap_constraints() -> None:
+    route = respx.get(url__regex=rf".*/{PROFILE_TRAFFIC}/.*").mock(
+        return_value=httpx.Response(200, json=traffic_ok_body())
+    )
+
+    with MapboxClient("test-token", max_attempts=1) as client:
+        client.fetch_route(
+            PROFILE_TRAFFIC,
+            LAT,
+            LON,
+            DEST_LAT,
+            DEST_LON,
+            bearing_deg=90.0,
+            bearing_tolerance_deg=45.0,
+            radius_m=50.0,
+        )
+
+    params = route.calls[0].request.url.params
+    assert params["radiuses"] == "50;50"
+    assert params["bearings"] == "90.0000,45.0000;90.0000,45.0000"
+
+
+@respx.mock
 def test_no_route() -> None:
     respx.get(url__regex=rf".*/{PROFILE_TRAFFIC}/.*").mock(
         return_value=httpx.Response(200, json={"code": "NoRoute", "routes": []})

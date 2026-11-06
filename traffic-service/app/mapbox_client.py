@@ -93,6 +93,19 @@ def _should_retry_status(status_code: int) -> bool:
     return status_code == 429 or status_code >= 500
 
 
+def _format_bearings(bearing_deg: float, tolerance_deg: float) -> str:
+    """Mapbox ``bearings`` for origin and destination, same direction of travel."""
+    angle = bearing_deg % 360.0
+    pair = f"{angle:.4f},{tolerance_deg:.4f}"
+    return f"{pair};{pair}"
+
+
+def _format_radiuses(radius_m: float) -> str:
+    """Mapbox ``radiuses`` snap limit, in meters, for both coordinates."""
+    text = f"{radius_m:.1f}".rstrip("0").rstrip(".")
+    return f"{text};{text}"
+
+
 class MapboxClient:
     """HTTP client for Mapbox Directions with exponential backoff retries."""
 
@@ -120,13 +133,28 @@ class MapboxClient:
     def __exit__(self, *args: object) -> None:
         self.close()
 
-    def _request(self, profile: str, lon1: float, lat1: float, lon2: float, lat2: float) -> dict[str, Any]:
+    def _request(
+        self,
+        profile: str,
+        lon1: float,
+        lat1: float,
+        lon2: float,
+        lat2: float,
+        *,
+        bearing_deg: float | None = None,
+        bearing_tolerance_deg: float | None = None,
+        radius_m: float | None = None,
+    ) -> dict[str, Any]:
         coords = f"{lon1},{lat1};{lon2},{lat2}"
         url = f"{MAPBOX_DIRECTIONS_BASE}/{profile}/{coords}"
         params: dict[str, str] = {
             "access_token": self._token,
             "alternatives": "false",
         }
+        if bearing_deg is not None and bearing_tolerance_deg is not None:
+            params["bearings"] = _format_bearings(bearing_deg, bearing_tolerance_deg)
+        if radius_m is not None:
+            params["radiuses"] = _format_radiuses(radius_m)
         # annotations require overview=full per Mapbox Directions v5 docs
         if profile == PROFILE_TRAFFIC:
             params["overview"] = "full"
@@ -179,20 +207,52 @@ class MapboxClient:
 
         raise last_error or MapboxHttpError("Mapbox request failed")
 
+    def fetch_route(
+        self,
+        profile: str,
+        lat1: float,
+        lon1: float,
+        lat2: float,
+        lon2: float,
+        *,
+        bearing_deg: float | None = None,
+        bearing_tolerance_deg: float | None = None,
+        radius_m: float | None = None,
+    ) -> RouteMetrics:
+        """Query one Directions profile. Coordinate order for Mapbox is lon, lat."""
+        body = self._request(
+            profile,
+            lon1,
+            lat1,
+            lon2,
+            lat2,
+            bearing_deg=bearing_deg,
+            bearing_tolerance_deg=bearing_tolerance_deg,
+            radius_m=radius_m,
+        )
+        return _parse_route(body, with_congestion=profile == PROFILE_TRAFFIC)
+
     def fetch_dual_route(
         self,
         lat1: float,
         lon1: float,
         lat2: float,
         lon2: float,
+        *,
+        bearing_deg: float | None = None,
+        bearing_tolerance_deg: float | None = None,
+        radius_m: float | None = None,
     ) -> DualRouteResult:
         """
         Query the same segment with driving-traffic and driving profiles.
 
         Coordinate order for Mapbox is longitude, latitude.
         """
-        traffic_body = self._request(PROFILE_TRAFFIC, lon1, lat1, lon2, lat2)
-        traffic = _parse_route(traffic_body, with_congestion=True)
-        free_body = self._request(PROFILE_FREE, lon1, lat1, lon2, lat2)
-        free = _parse_route(free_body, with_congestion=False)
+        snap = {
+            "bearing_deg": bearing_deg,
+            "bearing_tolerance_deg": bearing_tolerance_deg,
+            "radius_m": radius_m,
+        }
+        traffic = self.fetch_route(PROFILE_TRAFFIC, lat1, lon1, lat2, lon2, **snap)
+        free = self.fetch_route(PROFILE_FREE, lat1, lon1, lat2, lon2, **snap)
         return DualRouteResult(traffic=traffic, free=free)

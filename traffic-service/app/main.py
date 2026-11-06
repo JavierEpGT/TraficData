@@ -16,8 +16,16 @@ from app.config import Settings, get_settings
 from app.congestion import CongestionError, congestion_index
 from app.contract import build_payload, payload_to_dict, utc_timestamp_z
 from app.dw_client import DwClient, DwClientError
-from app.geo import destination_point
-from app.mapbox_client import DualRouteResult, MapboxClient, MapboxError
+from app.geo import candidate_bearings, destination_point
+from app.mapbox_client import (
+    PROFILE_FREE,
+    PROFILE_TRAFFIC,
+    DualRouteResult,
+    MapboxClient,
+    MapboxError,
+    MapboxRouteError,
+    RouteMetrics,
+)
 from app.models import FeedQuery, FeedResponse, ReadingRequest, ReadingResponse
 from app.storage import RawReading, Storage
 
@@ -38,11 +46,23 @@ class ProcessResult:
     reading_id: str | None = None
 
 
+# Eight departure headings. The configured bearing is tried first.
+BEARING_STEP_DEG = 45.0
+# Mapbox may only snap each endpoint this far onto the road network.
+SNAP_RADIUS_M = 50.0
+# Allowed deviation from the probed heading when snapping.
+BEARING_TOLERANCE_DEG = 45.0
+
+
 def _relative_diff(a: float, b: float) -> float:
     denom = max(a, b)
     if denom <= 0:
         return 1.0
     return abs(a - b) / denom
+
+
+def _distance_in_segment(distance_m: float, segment_length_m: float) -> bool:
+    return 0.5 * segment_length_m <= distance_m <= 3.0 * segment_length_m
 
 
 def validate_routes(
@@ -66,10 +86,139 @@ def validate_routes(
         return "ROUTE_MISMATCH"
 
     for dist in (t.distance_m, f.distance_m):
-        if dist < 0.5 * segment_length_m or dist > 3.0 * segment_length_m:
+        if not _distance_in_segment(dist, segment_length_m):
             return "SEGMENT_MISMATCH"
 
     return None
+
+
+@dataclass
+class SegmentMatch:
+    """Best Mapbox segment found for one GPS point, or the closest rejection."""
+
+    dest_lat: float
+    dest_lon: float
+    traffic: RouteMetrics | None = None
+    free: RouteMetrics | None = None
+    error: str | None = None
+
+
+def resolve_segment(
+    mapbox: MapboxClient,
+    latitude: float,
+    longitude: float,
+    segment_length_m: float,
+    preferred_bearing_deg: float,
+) -> SegmentMatch:
+    """
+    Probe headings until one route stays inside the segment window.
+
+    Traffic is queried first. Free-flow is requested only for a heading whose
+    traffic distance already fits ``[0.5×, 3×]`` of ``segment_length_m``.
+    The configured bearing is tried first and the search stops at the first
+    pair that passes ``validate_routes``.
+
+    Raises MapboxHttpError on auth, timeout, or server failures.
+    Raises MapboxRouteError when every heading comes back without a route.
+    """
+    closest_out: SegmentMatch | None = None
+    closest_gap = float("inf")
+    pair_failure: SegmentMatch | None = None
+    last_route_error: MapboxRouteError | None = None
+    snap = {
+        "bearing_tolerance_deg": BEARING_TOLERANCE_DEG,
+        "radius_m": SNAP_RADIUS_M,
+    }
+
+    for bearing in candidate_bearings(preferred_bearing_deg, BEARING_STEP_DEG):
+        dest_lat, dest_lon = destination_point(
+            latitude, longitude, segment_length_m, bearing
+        )
+        try:
+            traffic = mapbox.fetch_route(
+                PROFILE_TRAFFIC,
+                latitude,
+                longitude,
+                dest_lat,
+                dest_lon,
+                bearing_deg=bearing,
+                **snap,
+            )
+        except MapboxRouteError as exc:
+            last_route_error = exc
+            logger.info("bearing %.1f skipped: %s", bearing, exc)
+            continue
+
+        gap = abs(traffic.distance_m - segment_length_m)
+        if traffic.duration_s <= 0 or not _distance_in_segment(
+            traffic.distance_m, segment_length_m
+        ):
+            reason = (
+                "NON_POSITIVE_DURATION"
+                if traffic.duration_s <= 0
+                else "SEGMENT_MISMATCH"
+            )
+            logger.info(
+                "bearing %.1f dist_m=%.1f rejected (%s)",
+                bearing,
+                traffic.distance_m,
+                reason,
+            )
+            if gap < closest_gap:
+                closest_gap = gap
+                closest_out = SegmentMatch(
+                    dest_lat=dest_lat,
+                    dest_lon=dest_lon,
+                    traffic=traffic,
+                    error=reason,
+                )
+            continue
+
+        try:
+            free = mapbox.fetch_route(
+                PROFILE_FREE,
+                latitude,
+                longitude,
+                dest_lat,
+                dest_lon,
+                bearing_deg=bearing,
+                **snap,
+            )
+        except MapboxRouteError as exc:
+            last_route_error = exc
+            logger.info("bearing %.1f free-flow skipped: %s", bearing, exc)
+            continue
+
+        dual = DualRouteResult(traffic=traffic, free=free)
+        reason = validate_routes(dual, segment_length_m)
+        if reason is None:
+            logger.info(
+                "segment matched bearing=%.1f dist_traffic_m=%.1f",
+                bearing,
+                traffic.distance_m,
+            )
+            return SegmentMatch(
+                dest_lat=dest_lat,
+                dest_lon=dest_lon,
+                traffic=traffic,
+                free=free,
+            )
+
+        logger.info("bearing %.1f rejected: %s", bearing, reason)
+        if pair_failure is None:
+            pair_failure = SegmentMatch(
+                dest_lat=dest_lat,
+                dest_lon=dest_lon,
+                traffic=traffic,
+                free=free,
+                error=reason,
+            )
+
+    if pair_failure is not None:
+        return pair_failure
+    if closest_out is not None:
+        return closest_out
+    raise last_route_error or MapboxRouteError("Mapbox code='NoRoute'")
 
 
 def _feed_token_ok(expected: str | None, provided: str | None) -> bool:
@@ -91,7 +240,7 @@ def process_reading(
     dw: DwClient | None = None,
 ) -> ProcessResult:
     """
-    End-to-end: geo → Mapbox → validate → index → contract → DW/DRY_RUN → storage.
+    End-to-end: geo → Mapbox (heading search) → validate → index → contract → DW/DRY_RUN → storage.
 
     Never invents values: Mapbox failures and invalid readings are discarded.
     """
@@ -102,7 +251,7 @@ def process_reading(
 
     reading_id = str(uuid4())
     timestamp = utc_timestamp_z()
-    dest_lat, dest_lon = destination_point(
+    fallback_lat, fallback_lon = destination_point(
         latitude,
         longitude,
         settings.segment_length_m,
@@ -114,14 +263,20 @@ def process_reading(
         timestamp=timestamp,
         lat=latitude,
         lon=longitude,
-        dest_lat=dest_lat,
-        dest_lon=dest_lon,
+        dest_lat=fallback_lat,
+        dest_lon=fallback_lon,
         status="FAILED",
     )
 
     try:
         try:
-            dual = mapbox.fetch_dual_route(latitude, longitude, dest_lat, dest_lon)
+            match = resolve_segment(
+                mapbox,
+                latitude,
+                longitude,
+                settings.segment_length_m,
+                settings.segment_bearing_deg,
+            )
         except MapboxError as exc:
             logger.error("Mapbox failure for reading_id=%s: %s", reading_id, exc)
             raw.error = str(exc)
@@ -129,14 +284,20 @@ def process_reading(
             storage.insert_reading(raw)
             return ProcessResult(status="FAILED", error=str(exc), reading_id=reading_id)
 
-        raw.t_traffic_s = dual.traffic.duration_s
-        raw.t_free_s = dual.free.duration_s
-        raw.dist_traffic_m = dual.traffic.distance_m
-        raw.dist_free_m = dual.free.distance_m
-        raw.congestion_numeric_avg = dual.traffic.congestion_numeric_avg
+        raw.dest_lat = match.dest_lat
+        raw.dest_lon = match.dest_lon
+        if match.traffic is not None:
+            raw.t_traffic_s = match.traffic.duration_s
+            raw.dist_traffic_m = match.traffic.distance_m
+            raw.congestion_numeric_avg = match.traffic.congestion_numeric_avg
+        if match.free is not None:
+            raw.t_free_s = match.free.duration_s
+            raw.dist_free_m = match.free.distance_m
 
-        reason = validate_routes(dual, settings.segment_length_m)
-        if reason:
+        traffic = match.traffic
+        free = match.free
+        if match.error or traffic is None or free is None:
+            reason = match.error or "SEGMENT_MISMATCH"
             logger.warning("Invalid reading_id=%s reason=%s", reading_id, reason)
             raw.status = "INVALID"
             raw.error = reason
@@ -144,7 +305,7 @@ def process_reading(
             return ProcessResult(status="INVALID", error=reason, reading_id=reading_id)
 
         try:
-            index = congestion_index(dual.traffic.duration_s, dual.free.duration_s)
+            index = congestion_index(traffic.duration_s, free.duration_s)
         except CongestionError as exc:
             raw.status = "INVALID"
             raw.error = str(exc)

@@ -8,6 +8,7 @@ import respx
 
 from app.config import Settings
 from app.dw_client import DwClient
+from app.geo import destination_point
 from app.main import process_reading, validate_routes
 from app.mapbox_client import (
     PROFILE_FREE,
@@ -159,3 +160,73 @@ def test_send_when_not_dry_run(tmp_path) -> None:
     assert result.status == "SENT"
     assert dw_route.call_count == 1
     assert dw_route.calls[0].request.headers["Authorization"] == "Bearer token"
+
+
+@respx.mock
+def test_long_north_route_uses_next_bearing(settings: Settings, tmp_path) -> None:
+    traffic = respx.get(url__regex=rf".*/{PROFILE_TRAFFIC}/.*")
+    traffic.side_effect = [
+        httpx.Response(
+            200, json=traffic_ok_body(duration=300.0, distance=5000.0)
+        ),
+        httpx.Response(200, json=traffic_ok_body(duration=80.0, distance=420.0)),
+    ]
+    free = respx.get(url__regex=rf".*/{PROFILE_FREE}/.*").mock(
+        return_value=httpx.Response(
+            200, json=free_ok_body(duration=60.0, distance=410.0)
+        )
+    )
+
+    storage = Storage(str(tmp_path / "bearings.db"))
+    with MapboxClient("test-token", max_attempts=1) as mapbox:
+        result = process_reading(LAT, LON, settings, mapbox=mapbox, storage=storage)
+
+    assert result.status == "DRY_RUN"
+    assert traffic.call_count == 2
+    assert free.call_count == 1
+    good_lat, good_lon = destination_point(LAT, LON, 400.0, 45.0)
+    row = storage.fetch_all()[0]
+    assert row["dest_lat"] == pytest.approx(good_lat)
+    assert row["dest_lon"] == pytest.approx(good_lon)
+    assert row["dist_traffic_m"] == 420.0
+    params = traffic.calls[1].request.url.params
+    assert params["radiuses"] == "50;50"
+    assert params["bearings"] == "45.0000,45.0000;45.0000,45.0000"
+
+
+@respx.mock
+def test_all_bearings_too_long_stay_invalid(settings: Settings, tmp_path) -> None:
+    traffic = respx.get(url__regex=rf".*/{PROFILE_TRAFFIC}/.*").mock(
+        return_value=httpx.Response(
+            200, json=traffic_ok_body(duration=400.0, distance=5000.0)
+        )
+    )
+    free = respx.get(url__regex=rf".*/{PROFILE_FREE}/.*").mock(
+        return_value=httpx.Response(200, json=free_ok_body())
+    )
+
+    storage = Storage(str(tmp_path / "long.db"))
+    with MapboxClient("test-token", max_attempts=1) as mapbox:
+        result = process_reading(LAT, LON, settings, mapbox=mapbox, storage=storage)
+
+    assert result.status == "INVALID"
+    assert result.error == "SEGMENT_MISMATCH"
+    assert traffic.call_count == 8
+    assert free.call_count == 0
+    assert storage.fetch_all()[0]["dist_traffic_m"] == 5000.0
+
+
+@respx.mock
+def test_all_bearings_without_route_fail(settings: Settings, tmp_path) -> None:
+    traffic = respx.get(url__regex=rf".*/{PROFILE_TRAFFIC}/.*").mock(
+        return_value=httpx.Response(200, json={"code": "NoRoute", "routes": []})
+    )
+
+    storage = Storage(str(tmp_path / "noroute.db"))
+    with MapboxClient("test-token", max_attempts=1) as mapbox:
+        result = process_reading(LAT, LON, settings, mapbox=mapbox, storage=storage)
+
+    assert result.status == "FAILED"
+    assert "NoRoute" in (result.error or "")
+    assert traffic.call_count == 8
+    assert storage.fetch_all()[0]["status"] == "FAILED"

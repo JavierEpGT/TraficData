@@ -24,7 +24,7 @@ if str(ROOT) not in sys.path:
 
 from app.config import get_settings
 from app.congestion import CongestionError, congestion_index
-from app.geo import destination_point
+from app.main import resolve_segment
 from app.mapbox_client import MapboxClient, MapboxError
 from app.sources import CsvSource
 
@@ -75,12 +75,6 @@ def main() -> int:
             writer.writeheader()
 
         for lat, lon in points:
-            dest_lat, dest_lon = destination_point(
-                lat,
-                lon,
-                settings.segment_length_m,
-                settings.segment_bearing_deg,
-            )
             row = {
                 "run_timestamp": run_ts,
                 "lat": lat,
@@ -94,32 +88,56 @@ def main() -> int:
                 "error": "",
             }
             try:
-                dual = client.fetch_dual_route(lat, lon, dest_lat, dest_lon)
-                idx: float | str
-                try:
-                    idx = congestion_index(dual.traffic.duration_s, dual.free.duration_s)
-                except CongestionError as exc:
-                    idx = ""
-                    row["error"] = str(exc)
+                match = resolve_segment(
+                    client,
+                    lat,
+                    lon,
+                    settings.segment_length_m,
+                    settings.segment_bearing_deg,
+                )
+                idx: float | str = ""
+                if match.traffic is not None and match.free is not None and not match.error:
+                    try:
+                        idx = congestion_index(
+                            match.traffic.duration_s, match.free.duration_s
+                        )
+                    except CongestionError as exc:
+                        idx = ""
+                        row["error"] = str(exc)
+                elif match.error:
+                    row["error"] = match.error
 
                 row.update(
                     {
-                        "t_traffic_s": dual.traffic.duration_s,
-                        "t_free_s": dual.free.duration_s,
-                        "dist_traffic_m": dual.traffic.distance_m,
-                        "dist_free_m": dual.free.distance_m,
-                        "congestion_numeric_avg": dual.traffic.congestion_numeric_avg
-                        if dual.traffic.congestion_numeric_avg is not None
-                        else "",
+                        "t_traffic_s": ""
+                        if match.traffic is None
+                        else match.traffic.duration_s,
+                        "t_free_s": "" if match.free is None else match.free.duration_s,
+                        "dist_traffic_m": ""
+                        if match.traffic is None
+                        else match.traffic.distance_m,
+                        "dist_free_m": "" if match.free is None else match.free.distance_m,
+                        "congestion_numeric_avg": ""
+                        if match.traffic is None
+                        or match.traffic.congestion_numeric_avg is None
+                        else match.traffic.congestion_numeric_avg,
                         "traffic_congestion_index": idx,
                     }
                 )
+                t_traf = match.traffic.duration_s if match.traffic else float("nan")
+                t_free = match.free.duration_s if match.free else float("nan")
+                dist_m = match.traffic.distance_m if match.traffic else float("nan")
+                cong = (
+                    match.traffic.congestion_numeric_avg
+                    if match.traffic and match.traffic.congestion_numeric_avg is not None
+                    else float("nan")
+                )
                 print(
                     f"{lat:10.5f} {lon:10.5f} "
-                    f"{dual.traffic.duration_s:8.1f} {dual.free.duration_s:8.1f} "
-                    f"{dual.traffic.distance_m:8.1f} "
+                    f"{t_traf:8.1f} {t_free:8.1f} "
+                    f"{dist_m:8.1f} "
                     f"{(idx if idx != '' else float('nan')):8} "
-                    f"{(dual.traffic.congestion_numeric_avg or float('nan')):8} "
+                    f"{cong:8} "
                     f"{row['error']}"
                 )
             except MapboxError as exc:

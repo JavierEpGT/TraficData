@@ -40,6 +40,19 @@ def destination_point(
     return dest_lat, dest_lon
 
 
+def candidate_bearings(preferred_deg: float, step_deg: float = 45.0) -> list[float]:
+    """Preferred bearing first, then the rest of the circle at ``step_deg``."""
+    if step_deg <= 0 or step_deg > 360:
+        raise ValueError(f"step_deg must be in (0, 360], got {step_deg}")
+    steps = int(round(360.0 / step_deg))
+    bearings: list[float] = []
+    for offset in range(steps):
+        bearing = round((preferred_deg + offset * step_deg) % 360.0, 6) % 360.0
+        if bearing not in bearings:
+            bearings.append(bearing)
+    return bearings
+
+
 def haversine_m(
     lat1: float,
     lon1: float,
