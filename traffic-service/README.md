@@ -101,6 +101,42 @@ El disco de Render se borra al dormir o redesplegar. Sin `DATABASE_URL`, el feed
 3. Save. Render redespliega y `GET /traffic/readings` lee `readings_raw` en Neon.
 4. En Render, `DATABASE_URL` es obligatoria: el proceso no arranca con SQLite.
 
+## GitHub Actions (ingesta automática G1 → Neon)
+
+Workflow: [`.github/workflows/ingest.yml`](../.github/workflows/ingest.yml).
+
+- **Cron:** cada 30 minutos (hora **UTC**, no hora Guatemala).
+- **Manual:** Actions → *Ingest G1 to Neon* → *Run workflow*, o `gh workflow run ingest.yml`.
+- **Comando:** `python -m app.cli run --from-g1` (una corrida por job; sin `--loop`).
+- El runner **no** usa SQLite: las lecturas van a Neon (`DATABASE_URL`) para que G4 las lea vía Render.
+
+### Secrets (Settings → Secrets and variables → Actions)
+
+| Secret | Uso |
+| --- | --- |
+| `MAPBOX_ACCESS_TOKEN` | Directions API |
+| `STUDENT_ID` | Data Contract |
+| `SECRET_KEY` | `auth_hash` |
+| `DATABASE_URL` | Misma URL Neon que Render |
+| `GROUP1_API_URL` | Feed G1 (`…/api/records`) |
+| `GROUP1_API_TOKEN` | Header `x-api-key` de G1 |
+
+`DRY_RUN=true` está fijo en el workflow (no envía al DW hasta coordinar con G4). No subas `.env` al repo.
+
+```bash
+# Configurar secrets (valores locales; no los pegues en chats)
+gh secret set MAPBOX_ACCESS_TOKEN
+gh secret set STUDENT_ID
+gh secret set SECRET_KEY
+gh secret set DATABASE_URL
+gh secret set GROUP1_API_URL
+gh secret set GROUP1_API_TOKEN
+
+# Primer run + seguimiento
+gh workflow run ingest.yml
+gh run watch
+```
+
 ## CLI
 
 ```bash

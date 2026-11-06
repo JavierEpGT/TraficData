@@ -1,0 +1,39 @@
+name: Ingest G1 to Neon
+
+on:
+  schedule:
+    # Every 30 minutes (UTC). Manual runs use workflow_dispatch.
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: traffic-service
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: traffic-service/requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run ingestion from G1
+        env:
+          MAPBOX_ACCESS_TOKEN: ${{ secrets.MAPBOX_ACCESS_TOKEN }}
+          STUDENT_ID: ${{ secrets.STUDENT_ID }}
+          SECRET_KEY: ${{ secrets.SECRET_KEY }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          GROUP1_API_URL: ${{ secrets.GROUP1_API_URL }}
+          GROUP1_API_TOKEN: ${{ secrets.GROUP1_API_TOKEN }}
+          DRY_RUN: "true"
+        run: python -m app.cli run --from-g1

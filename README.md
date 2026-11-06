@@ -234,6 +234,10 @@ python -m app.cli run --from-g1 --loop --interval 300
 python -m app.cli export-csv --out readings.csv
 ```
 
+### GitHub Actions (ingesta automática)
+
+Cron cada 30 min (UTC) + disparo manual: `python -m app.cli run --from-g1` → Neon. Secrets y pasos en [`traffic-service/README.md`](traffic-service/README.md#github-actions-ingesta-automática-g1--neon).
+
 ### Evidencia de cobertura (hora pico vs valle)
 
 ```bash
