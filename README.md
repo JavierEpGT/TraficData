@@ -236,7 +236,7 @@ python -m app.cli export-csv --out readings.csv
 
 ### GitHub Actions (ingesta automática)
 
-Cron 1 vez al día (08:00 Guatemala) + disparo manual: `python -m app.cli run --from-g1` → Neon. Secrets y pasos en [`traffic-service/README.md`](traffic-service/README.md#github-actions-ingesta-automática-g1--neon).
+Cron cada 2 días (08:00 Guatemala) + disparo manual: `python -m app.cli run --from-g1` → Neon. Secrets y pasos en [`traffic-service/README.md`](traffic-service/README.md#github-actions-ingesta-automática-g1--neon).
 
 ### Evidencia de cobertura (hora pico vs valle)
 
