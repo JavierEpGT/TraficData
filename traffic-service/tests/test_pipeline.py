@@ -6,7 +6,10 @@ import httpx
 import pytest
 import respx
 
+from uuid import uuid4
+
 from app.config import Settings
+from app.contract import utc_timestamp_z
 from app.dw_client import DwClient
 from app.geo import destination_point
 from app.main import process_reading, validate_routes
@@ -17,7 +20,7 @@ from app.mapbox_client import (
     MapboxClient,
     RouteMetrics,
 )
-from app.storage import Storage
+from app.storage import RawReading, Storage
 from tests.conftest import free_ok_body, traffic_ok_body
 
 
@@ -230,3 +233,59 @@ def test_all_bearings_without_route_fail(settings: Settings, tmp_path) -> None:
     assert "NoRoute" in (result.error or "")
     assert traffic.call_count == 8
     assert storage.fetch_all()[0]["status"] == "FAILED"
+
+
+@respx.mock
+def test_skip_duplicate_valid_same_day(settings: Settings, tmp_path) -> None:
+    storage = Storage(str(tmp_path / "skip.db"))
+    storage.insert_reading(
+        RawReading(
+            reading_id=str(uuid4()),
+            timestamp=utc_timestamp_z(),
+            lat=LAT,
+            lon=LON,
+            traffic_congestion_index=0.4,
+            status="DRY_RUN",
+        )
+    )
+    traffic = respx.get(url__regex=rf".*/{PROFILE_TRAFFIC}/.*").mock(
+        return_value=httpx.Response(200, json=traffic_ok_body())
+    )
+
+    with MapboxClient("test-token", max_attempts=1) as mapbox:
+        result = process_reading(LAT, LON, settings, mapbox=mapbox, storage=storage)
+
+    assert result.status == "SKIPPED"
+    assert result.error == "DUPLICATE_TODAY"
+    assert traffic.call_count == 0
+    assert len(storage.fetch_all()) == 1
+
+
+@respx.mock
+def test_retry_after_failed_same_day(settings: Settings, tmp_path) -> None:
+    storage = Storage(str(tmp_path / "retry.db"))
+    storage.insert_reading(
+        RawReading(
+            reading_id=str(uuid4()),
+            timestamp=utc_timestamp_z(),
+            lat=LAT,
+            lon=LON,
+            traffic_congestion_index=None,
+            status="FAILED",
+            error="NoRoute",
+        )
+    )
+    respx.get(url__regex=rf".*/{PROFILE_TRAFFIC}/.*").mock(
+        return_value=httpx.Response(200, json=traffic_ok_body())
+    )
+    respx.get(url__regex=rf".*/{PROFILE_FREE}/.*").mock(
+        return_value=httpx.Response(200, json=free_ok_body())
+    )
+
+    with MapboxClient("test-token", max_attempts=1) as mapbox:
+        result = process_reading(LAT, LON, settings, mapbox=mapbox, storage=storage)
+
+    assert result.status == "DRY_RUN"
+    rows = storage.fetch_all()
+    assert len(rows) == 2
+    assert {r["status"] for r in rows} == {"FAILED", "DRY_RUN"}

@@ -112,3 +112,43 @@ def test_pg_export_csv(pg_storage: Storage, tmp_path) -> None:
     text = out.read_text(encoding="utf-8")
     assert "reading_id" in text
     assert reading.reading_id in text
+
+
+def test_pg_exists_valid_reading_today(pg_storage: Storage) -> None:
+    from datetime import datetime, timezone
+
+    now = datetime(2099, 3, 10, 15, 0, 0, tzinfo=timezone.utc)
+    pg_storage.insert_reading(_reading(timestamp="2099-03-10T08:00:00Z"))
+    assert (
+        pg_storage.exists_valid_reading_today(14.6349, -90.5069, now=now) is True
+    )
+    pg_storage.insert_reading(
+        _reading(
+            timestamp="2099-03-10T09:00:00Z",
+            status="FAILED",
+            index=None,
+            lat=14.7,
+            lon=-90.6,
+        )
+    )
+    assert pg_storage.exists_valid_reading_today(14.7, -90.6, now=now) is False
+
+
+def test_pg_fetch_latest_valid_per_coord(pg_storage: Storage) -> None:
+    older = _reading(timestamp="2099-04-01T08:00:00Z", index=0.1)
+    newer = _reading(timestamp="2099-04-02T08:00:00Z", index=0.9)
+    other = _reading(
+        timestamp="2099-04-02T09:00:00Z",
+        lat=14.71,
+        lon=-90.61,
+        index=0.55,
+    )
+    pg_storage.insert_reading(older)
+    pg_storage.insert_reading(newer)
+    pg_storage.insert_reading(other)
+
+    rows = pg_storage.fetch_latest_valid_per_coord()
+    ids = {r["reading_id"] for r in rows}
+    assert newer.reading_id in ids
+    assert other.reading_id in ids
+    assert older.reading_id not in ids

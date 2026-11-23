@@ -181,9 +181,10 @@ Si aparecen muchos `INVALID` con `SEGMENT_MISMATCH`, el snap de Mapbox alargó l
 ### Looker Studio (tablero G2)
 
 1. Ejecutar el batch (o `python -m app.cli export-csv --out readings.csv`).
-2. En [Looker Studio](https://lookerstudio.google.com/): **Crear → Fuente de datos → Subir archivo** → seleccionar `readings.csv`.
-3. Campos útiles: `timestamp`, `lat`, `lon`, `traffic_congestion_index`, `status`, `t_traffic_s`, `t_free_s`.
-4. Gráficos sugeridos: serie temporal del índice, mapa por lat/lon, tabla filtrada por `status=DRY_RUN` (o `SENT` cuando exista DW).
+2. En [Looker Studio](https://lookerstudio.google.com/): **Crear → Fuente de datos → Subir archivo** → seleccionar `readings.csv` (o actualizar la fuente existente).
+3. El CSV exporta **una lectura válida por coordenada** (la más reciente: `DRY_RUN`/`SENT` con índice). El scorecard **«lecturas válidas»** debe ser el conteo de registros de esa fuente (≈ número de GPS únicos válidos, no el historial multi-día de Neon).
+4. Campos útiles: `timestamp`, `lat`, `lon`, `traffic_congestion_index`, `status`, `t_traffic_s`, `t_free_s`.
+5. Gráficos sugeridos: mapa por lat/lon, tabla de índice, scorecard de conteo de filas = lecturas válidas.
 
 El envío al Data Warehouse del G4 sigue pendiente (`DRY_RUN=false` + `DW_ENDPOINT_URL`).
 

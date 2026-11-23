@@ -230,7 +230,7 @@ python -m app.cli run --from-g1
 python -m app.cli run --csv points.csv --loop --interval 300
 python -m app.cli run --from-g1 --loop --interval 300
 
-# Exportar SQLite → CSV (fuente Looker Studio)
+# Exportar → CSV Looker (1 lectura válida por coordenada)
 python -m app.cli export-csv --out readings.csv
 ```
 
@@ -260,7 +260,7 @@ Mapbox está mockeado solo en `tests/` (respx). No hay llamadas reales a Mapbox 
 
 SQLite con: `reading_id`, `timestamp`, lat/lon originales, destino del tramo, tiempos y distancias (traffic/free), promedio `congestion_numeric`, índice, `status` (`SENT` | `DRY_RUN` | `FAILED` | `INVALID`), `error`, `created_at`.
 
-Ese CSV exportado alimentará el tablero de G2 en Looker Studio.
+Ese CSV exportado alimentará el tablero de G2 en Looker Studio (una fila por GPS válido; el KPI «lecturas válidas» = conteo de registros).
 
 ---
 

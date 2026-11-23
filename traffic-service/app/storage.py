@@ -16,6 +16,8 @@ from typing import Any, Iterable
 
 logger = logging.getLogger(__name__)
 
+COORD_ROUND_DECIMALS = 5
+
 CREATE_TABLE_SQL = """
 CREATE TABLE IF NOT EXISTS readings_raw (
     reading_id TEXT PRIMARY KEY,
@@ -132,6 +134,59 @@ class Storage:
         with self._connect_pg() as conn:
             conn.execute(CREATE_TABLE_SQL_PG)
             conn.commit()
+
+    def exists_valid_reading_today(
+        self,
+        lat: float,
+        lon: float,
+        *,
+        now: datetime | None = None,
+    ) -> bool:
+        """True if a valid DRY_RUN/SENT reading exists for this coord on the UTC day."""
+        day = (now or datetime.now(timezone.utc)).strftime("%Y-%m-%d")
+        lat_r = round(lat, COORD_ROUND_DECIMALS)
+        lon_r = round(lon, COORD_ROUND_DECIMALS)
+        if self.database_url:
+            return self._exists_valid_reading_today_pg(lat_r, lon_r, day)
+        return self._exists_valid_reading_today_sqlite(lat_r, lon_r, day)
+
+    def _exists_valid_reading_today_sqlite(
+        self,
+        lat_r: float,
+        lon_r: float,
+        day: str,
+    ) -> bool:
+        sql = """
+            SELECT 1 FROM readings_raw
+            WHERE status IN ('DRY_RUN', 'SENT')
+              AND traffic_congestion_index IS NOT NULL
+              AND substr(timestamp, 1, 10) = ?
+              AND ROUND(lat, 5) = ?
+              AND ROUND(lon, 5) = ?
+            LIMIT 1
+        """
+        with self._connect() as conn:
+            row = conn.execute(sql, (day, lat_r, lon_r)).fetchone()
+        return row is not None
+
+    def _exists_valid_reading_today_pg(
+        self,
+        lat_r: float,
+        lon_r: float,
+        day: str,
+    ) -> bool:
+        sql = """
+            SELECT 1 FROM readings_raw
+            WHERE status IN ('DRY_RUN', 'SENT')
+              AND traffic_congestion_index IS NOT NULL
+              AND (timestamp::timestamptz AT TIME ZONE 'UTC')::date = %s::date
+              AND ROUND(lat::numeric, 5) = %s
+              AND ROUND(lon::numeric, 5) = %s
+            LIMIT 1
+        """
+        with self._connect_pg() as conn:
+            row = conn.execute(sql, (day, lat_r, lon_r)).fetchone()
+        return row is not None
 
     def insert_reading(self, reading: RawReading) -> None:
         if self.database_url:
@@ -267,8 +322,63 @@ class Storage:
             rows = conn.execute(sql, params).fetchall()
         return [dict(row) for row in rows]
 
+    def fetch_latest_valid_per_coord(self) -> list[dict[str, Any]]:
+        """Latest valid reading per GPS point (Looker Studio / dashboard CSV)."""
+        if self.database_url:
+            return self._fetch_latest_valid_per_coord_pg()
+        return self._fetch_latest_valid_per_coord_sqlite()
+
+    def _fetch_latest_valid_per_coord_sqlite(self) -> list[dict[str, Any]]:
+        sql = """
+            SELECT r.*
+            FROM readings_raw AS r
+            INNER JOIN (
+                SELECT
+                    ROUND(lat, 5) AS lat5,
+                    ROUND(lon, 5) AS lon5,
+                    MAX(timestamp || '|' || created_at || '|' || reading_id) AS pick
+                FROM readings_raw
+                WHERE status IN ('DRY_RUN', 'SENT')
+                  AND traffic_congestion_index IS NOT NULL
+                GROUP BY ROUND(lat, 5), ROUND(lon, 5)
+            ) AS latest
+              ON ROUND(r.lat, 5) = latest.lat5
+             AND ROUND(r.lon, 5) = latest.lon5
+             AND (r.timestamp || '|' || r.created_at || '|' || r.reading_id) = latest.pick
+            ORDER BY r.timestamp ASC, r.reading_id ASC
+        """
+        with self._connect() as conn:
+            rows = conn.execute(sql).fetchall()
+        return [dict(row) for row in rows]
+
+    def _fetch_latest_valid_per_coord_pg(self) -> list[dict[str, Any]]:
+        sql = """
+            SELECT * FROM (
+                SELECT
+                    r.*,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY ROUND(lat::numeric, 5), ROUND(lon::numeric, 5)
+                        ORDER BY timestamp DESC, created_at DESC, reading_id DESC
+                    ) AS rn
+                FROM readings_raw AS r
+                WHERE status IN ('DRY_RUN', 'SENT')
+                  AND traffic_congestion_index IS NOT NULL
+            ) AS ranked
+            WHERE rn = 1
+            ORDER BY timestamp ASC, reading_id ASC
+        """
+        with self._connect_pg() as conn:
+            rows = conn.execute(sql).fetchall()
+        # Drop window helper column if present
+        result: list[dict[str, Any]] = []
+        for row in rows:
+            item = dict(row)
+            item.pop("rn", None)
+            result.append(item)
+        return result
+
     def export_csv(self, out_path: str) -> int:
-        rows = self.fetch_all()
+        rows = self.fetch_latest_valid_per_coord()
         fieldnames = [
             "reading_id",
             "timestamp",

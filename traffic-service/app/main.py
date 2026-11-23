@@ -246,8 +246,17 @@ def process_reading(
     """
     owns_mapbox = mapbox is None
     owns_storage = storage is None
-    mapbox = mapbox or MapboxClient(settings.mapbox_access_token)
     storage = storage or Storage(settings.db_path, settings.database_url)
+
+    if storage.exists_valid_reading_today(latitude, longitude):
+        logger.info(
+            "skipped_duplicate lat=%s lon=%s (valid reading already exists today UTC)",
+            latitude,
+            longitude,
+        )
+        return ProcessResult(status="SKIPPED", error="DUPLICATE_TODAY")
+
+    mapbox = mapbox or MapboxClient(settings.mapbox_access_token)
 
     reading_id = str(uuid4())
     timestamp = utc_timestamp_z()
